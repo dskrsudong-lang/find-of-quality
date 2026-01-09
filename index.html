@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<title>Find of Quality</title>
+<style>
+ body{margin:0;background:#000;display:flex;justify-content:center;}
+ canvas{background:#FBFBFB;image-rendering:pixelated;filter:contrast(1.1) saturate(1.2);}
+ button{font-size:22px;padding:10px 20px;}
+</style>
+</head>
+<body>
+<canvas id="game" width="760" height="1280"></canvas>
+<script>
+/**************** CONFIG ****************/
+const W=760,H=1280,TILE=40;
+const LETTERS=['D','S','K','R','Q','A'];
+const COLORS={floor:'#FBFBFB',wall:'#FEE65F',letter:'#A09D8D',smoke:'#DDD'};
+
+/**************** STATE ****************/
+let gameState='TITLE',score=0,fuel=1000,stage=0,shake=0;
+let highScores=JSON.parse(localStorage.getItem('foq_rank')||'[]');
+
+/**************** CANVAS ****************/
+const canvas=document.getElementById('game');
+const ctx=canvas.getContext('2d');
+
+/**************** INPUT ****************/
+const keys={};
+window.addEventListener('keydown',e=>keys[e.key]=true);
+window.addEventListener('keyup',e=>keys[e.key]=false);
+
+/**************** MAP ****************/
+function buildMap(){
+ const map=[];
+ for(let y=0;y<32;y++){
+  map[y]=[];
+  for(let x=0;x<19;x++){
+   if(x===0||y===0||x===18||y===31) map[y][x]=1;
+   else if((x===8||x===10)&&(y>5&&y<27)) map[y][x]=2;
+   else map[y][x]=0;
+  }
+ }
+ return map;
+}
+let map=buildMap();
+
+/**************** PLAYER ****************/
+const player={x:60,y:60,s:2};
+
+/**************** FLAGS ****************/
+let flags=[];
+function spawnFlags(){
+ flags=[];
+ for(let i=0;i<6;i++) flags.push({x:120+Math.random()*500,y:150+Math.random()*900,taken:false});
+}
+
+/**************** SMOKE ****************/
+let smokes=[];
+function dropSmoke(){ smokes.push({x:player.x,y:player.y,r:45,t:240}); shake=10; }
+
+/**************** ENEMIES (STEP7 FULL) ****************/
+let enemies=[];
+function spawnEnemies(){
+ enemies=[
+  {x:600,y:200,s:1.6,state:'patrol',dir:1,boost:0,blind:0},
+  {x:600,y:1000,s:1.8,state:'patrol',dir:-1,boost:0,blind:0},
+  {x:300,y:600,s:1.7,state:'patrol',dir:1,boost:0,blind:0}
+ ];
+}
+
+function updateEnemy(e){
+ if(e.blind>0){ e.blind--; wander(e); return; }
+ const dx=player.x-e.x, dy=player.y-e.y;
+ const dist=Math.hypot(dx,dy)||1;
+ smokes.forEach(s=>{ if(Math.hypot(e.x-s.x,e.y-s.y)<s.r) e.blind=120; });
+ if(dist<160) e.state='chase'; else if(dist>260) e.state='patrol';
+ if(e.state==='chase'){
+  if(e.boost<=0){ e.boost=80; e.s+=0.9; }
+  e.x+=dx/dist*e.s; e.y+=dy/dist*e.s;
+ } else wander(e);
+ if(e.boost>0){ e.boost--; if(e.boost===0) e.s-=0.9; }
+}
+
+function wander(e){
+ e.x+=e.dir*e.s;
+ if(isWall(e.x,e.y)){ e.dir*=-1; e.y+=(Math.random()-0.5)*30; }
+}
+
+/**************** COLLISION ****************/
+function isWall(x,y){ const tx=Math.floor(x/TILE),ty=Math.floor(y/TILE); return map[ty]&&map[ty][tx]>0; }
+
+/**************** STAGE ****************/
+function checkStageClear(){
+ if(flags.every(f=>f.taken)){
+  stage++;
+  if(stage>=LETTERS.length){ endGame(true); return; }
+  map=buildMap(); spawnFlags(); spawnEnemies(); smokes=[];
+  player.x=60; player.y=60; shake=20;
+ }
+}
+
+/**************** RADAR ****************/
+function drawRadar(){
+ const rx=560,ry=20,rw=180,rh=180;
+ ctx.fillStyle='#000'; ctx.fillRect(rx,ry,rw,rh);
+ ctx.strokeStyle='#FFF'; ctx.strokeRect(rx,ry,rw,rh);
+ const sx=rw/(19*TILE), sy=rh/(32*TILE);
+ ctx.fillStyle='red'; ctx.fillRect(rx+player.x*sx-2,ry+player.y*sy-2,4,4);
+ ctx.fillStyle='blue'; enemies.forEach(e=>ctx.fillRect(rx+e.x*sx-2,ry+e.y*sy-2,4,4));
+ ctx.fillStyle='yellow'; flags.forEach(f=>{ if(!f.taken) ctx.fillRect(rx+f.x*sx-1.5,ry+f.y*sy-1.5,3,3); });
+}
+
+/**************** CRT ****************/
+function drawCRT(){ ctx.fillStyle='rgba(0,0,0,0.15)'; for(let y=0;y<H;y+=4) ctx.fillRect(0,y,W,2); }
+
+/**************** END & RANK ****************/
+function endGame(clear){
+ gameState=clear?'CLEAR':'OVER';
+ highScores.push(score);
+ highScores=highScores.sort((a,b)=>b-a).slice(0,5);
+ localStorage.setItem('foq_rank',JSON.stringify(highScores));
+}
+
+/**************** LOOP ****************/
+function loop(){ requestAnimationFrame(loop);
+ ctx.save(); if(shake>0){ ctx.translate((Math.random()-0.5)*shake,(Math.random()-0.5)*shake); shake--; }
+ ctx.clearRect(0,0,W,H);
+
+ if(gameState==='TITLE'){
+  ctx.restore(); ctx.fillStyle='#000'; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#FFF'; ctx.font='48px Arial'; ctx.textAlign='center';
+  ctx.fillText('Find of Quality',W/2,H/2-40);
+  ctx.font='28px Arial'; ctx.fillText('START',W/2,H/2+40);
+  canvas.onclick=()=>{ gameState='PLAY'; stage=0; score=0; fuel=1000; spawnFlags(); spawnEnemies(); };
+  return;
+ }
+
+ if(gameState==='CLEAR'||gameState==='OVER'){
+  ctx.restore(); ctx.fillStyle='#000'; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#FFF'; ctx.textAlign='center';
+  ctx.font='42px Arial'; ctx.fillText(gameState==='CLEAR'?'YOU WIN':'GAME OVER',W/2,200);
+  if(gameState==='CLEAR'){
+   ctx.font='22px Arial';
+   ctx.fillText('Prioritizing Patients',W/2,260);
+   ctx.fillText('Courageous voice',W/2,300);
+   ctx.fillText('Continuous improvement',W/2,340);
+  }
+  ctx.font='26px Arial'; ctx.fillText('SCORE: '+score,W/2,420);
+  ctx.font='22px Arial'; ctx.fillText('RANKING',W/2,480);
+  highScores.forEach((s,i)=>ctx.fillText(`${i+1}. ${s}`,W/2,520+i*30));
+  ctx.fillText('CLICK TO RESTART',W/2,720);
+  canvas.onclick=()=>{ gameState='TITLE'; };
+  return;
+ }
+
+ fuel--; if(fuel<=0) endGame(false);
+ const vx=(keys['ArrowLeft']?-1:keys['ArrowRight']?1:0)*player.s;
+ const vy=(keys['ArrowUp']?-1:keys['ArrowDown']?1:0)*player.s;
+ if(keys[' ']){ dropSmoke(); keys[' ']=false; }
+ const nx=player.x+vx, ny=player.y+vy;
+ if(!isWall(nx,ny)){ player.x=nx; player.y=ny; }
+
+ enemies.forEach(e=>{ updateEnemy(e); if(Math.hypot(player.x-e.x,player.y-e.y)<18) endGame(false); });
+ flags.forEach(f=>{ if(!f.taken&&Math.hypot(player.x-f.x,player.y-f.y)<20){ f.taken=true; score+=100; }});
+ smokes.forEach(s=>s.t--); smokes=smokes.filter(s=>s.t>0);
+ checkStageClear();
+
+ for(let y=0;y<32;y++)for(let x=0;x<19;x++) if(map[y][x]>0){ ctx.fillStyle=map[y][x]===2?COLORS.letter:COLORS.wall; ctx.fillRect(x*TILE,y*TILE,TILE,TILE); }
+ ctx.fillStyle='yellow'; flags.forEach(f=>{ if(!f.taken) ctx.fillRect(f.x-6,f.y-6,12,12); });
+ ctx.fillStyle=COLORS.smoke; smokes.forEach(s=>{ ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,Math.PI*2); ctx.fill(); });
+ ctx.fillStyle='red'; ctx.fillRect(player.x-8,player.y-8,16,16);
+ ctx.fillStyle='blue'; enemies.forEach(e=>ctx.fillRect(e.x-8,e.y-8,16,16));
+
+ ctx.restore(); drawCRT();
+ ctx.fillStyle='#000'; ctx.font='20px Arial'; ctx.textAlign='left';
+ ctx.fillText('STAGE: '+LETTERS[stage],10,24);
+ ctx.fillText('SCORE: '+score,10,48);
+ ctx.fillText('FUEL: '+fuel,10,72);
+ drawRadar();
+}
+spawnFlags(); spawnEnemies(); loop();
+</script>
+</body>
+</html>
